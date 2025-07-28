@@ -1,14 +1,13 @@
 ﻿using Microsoft.VisualStudio.PlatformUI;
 using System.Windows;
-using System;
 using System.Windows.Controls;
-using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using VSGitBlame.Core;
-using System.Linq;
 using Microsoft.VisualStudio.Text.Editor;
 using Color = System.Drawing.Color;
 using System.Collections.Generic;
+using System.Windows.Input;
+using System;
 
 namespace VSGitBlame;
 
@@ -17,7 +16,6 @@ public class CommitInfoView
     public Border _container;
     public TextBlock _summaryView;
     public TextBlock _commitDetailsView;
-    public Image _profileIcon;
     public StackPanel _detailsView;
     public Border _detailsViewContainer;
 
@@ -25,11 +23,17 @@ public class CommitInfoView
     public bool _isDetailsVisible;
     public bool _showDetails;
 
+    public bool _isMouseDown;
+
+    public string _commitHash;
+
     public IAdornmentLayer _adornmentLayer;
 }
 
 public static class CommitInfoViewFactory
-{    
+{
+    private static (string, long)? _copiedCommit;
+
     private static VSGitBlamePackage _package;
     private static CommitInfoViewOptions _options;
 
@@ -130,14 +134,6 @@ public static class CommitInfoViewFactory
                 Orientation = Orientation.Horizontal,
             };
 
-            view._profileIcon = new Image
-            {
-                Width = 50,
-                Height = 50,
-                Margin = new Thickness(0, 0, 3, 0),
-            };
-            view._detailsView.Children.Add(view._profileIcon);
-
             view._commitDetailsView = new TextBlock
             {
                 Foreground = new SolidColorBrush(Colors.White),
@@ -187,6 +183,25 @@ public static class CommitInfoViewFactory
                 view._detailsViewContainer.Visibility = Visibility.Hidden;
             };
 
+            rootPanel.MouseLeftButtonDown += (sender, e) =>
+            {
+                if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) >= (ModifierKeys.Control | ModifierKeys.Shift))
+                    view._isMouseDown = true;
+            };
+
+            rootPanel.MouseLeftButtonUp += (sender, e) =>
+            {
+                if (view._isMouseDown == false)
+                    return;
+
+                view._isMouseDown = false;
+
+                Clipboard.SetText(view._commitHash);
+                view._summaryView.Text = $"Commit hash copied • {view._summaryView.Text}";
+
+                _copiedCommit = (view._commitHash, DateTime.Now.Ticks + TimeSpan.FromSeconds(5).Ticks);
+            };
+
             view._container = new Border
             {
                 Margin = new Thickness(30, 0, 0, 0),
@@ -200,32 +215,30 @@ public static class CommitInfoViewFactory
         if (commitInfo.ShowDetails == false)
         {
             view._summaryView.Text = commitInfo.Summary;
-            view._profileIcon.Source = null;
             view._commitDetailsView.Text = string.Empty;
             view._detailsViewContainer.Visibility = Visibility.Hidden;
         }
         else
         {
-            view._summaryView.Text = $"{commitInfo.AuthorName}, {commitInfo.Time:yyyy/MM/dd HH:mm} • {commitInfo.Summary}";
-            view._profileIcon.Source = new BitmapImage(new Uri(GetGravatarUrl(commitInfo.AuthorEmail), UriKind.Absolute));
+            view._summaryView.Text = $"{commitInfo.AuthorName} • {commitInfo.Hash.Substring(0, 7)} • {commitInfo.Time:yyyy/MM/dd HH:mm} • {commitInfo.Summary}";
             view._commitDetailsView.Text =
                 $"""
             {commitInfo.AuthorName} | {commitInfo.Time:f}
             {commitInfo.Summary}
             Commit: {commitInfo.Hash.Substring(0, 7)}
             """;
+
+            if (_copiedCommit.HasValue && _copiedCommit.Value.Item1 == commitInfo.Hash && _copiedCommit.Value.Item2 > DateTime.Now.Ticks)
+            {
+                view._summaryView.Text = $"Commit hash copied • {view._summaryView.Text}";
+            }
         }
 
-        view._showDetails = commitInfo.ShowDetails;
+        view._commitHash = commitInfo.Hash;
+
+        view._showDetails = false; // commitInfo.ShowDetails;
         view._container.Visibility = Visibility.Visible;
 
         return view._container;
-    }
-
-    static string GetGravatarUrl(string email)
-    {
-        string emailMD5 = System.Security.Cryptography.MD5.Create().ComputeHash(System.Text.Encoding.ASCII.GetBytes(email))
-            .Select(b => b.ToString("x2")).Aggregate((s1, s2) => s1 + s2);
-        return $"https://www.gravatar.com/avatar/{emailMD5}";
     }
 }
